@@ -36,11 +36,6 @@ func (i *Installer) Install() error {
 	i.once.Do(func() {
 		i.log.Info("Starting Playwright installation")
 
-		if i.config.Install.Path != "" {
-			os.Setenv("PLAYWRIGHT_BROWSERS_PATH", i.config.Install.Path)
-			i.log.Info("Set PLAYWRIGHT_BROWSERS_PATH", String("path", i.config.Install.Path))
-		}
-
 		// Create driver options
 		options := &playwright.RunOptions{
 			SkipInstallBrowsers: false,
@@ -48,7 +43,7 @@ func (i *Installer) Install() error {
 			Verbose:             true,
 			Stdout:              io.Writer(os.Stdout),
 			Stderr:              io.Writer(os.Stderr),
-			DriverDirectory:     i.config.Install.Path,
+			DriverDirectory:     defaultInstallPath,
 		}
 
 		// Create driver instance
@@ -95,11 +90,6 @@ func (i *Installer) Install() error {
 // IsInstalled returns whether dependencies are installed
 func (i *Installer) IsInstalled() bool {
 	return i.installed
-}
-
-// GetInstallPath returns the installation path
-func (i *Installer) GetInstallPath() string {
-	return i.config.Install.Path
 }
 
 // EnsureInstalled checks and installs if necessary

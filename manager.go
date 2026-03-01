@@ -57,7 +57,8 @@ func (m *BrowserManager) init() error {
 
 	// Start Playwright.
 	runOpts := &playwright.RunOptions{
-		DriverDirectory: m.config.Install.Path,
+		Browsers:        []string{"chromium"},
+		DriverDirectory: defaultInstallPath,
 	}
 	pw, err := playwright.Run(runOpts)
 	if err != nil {
@@ -87,7 +88,7 @@ func (m *BrowserManager) init() error {
 
 	m.log.Info("browser manager initialised",
 		String("version", browser.Version()),
-		String("install_path", m.config.Install.Path))
+		String("install_path", defaultInstallPath))
 	return nil
 }
 

@@ -4,7 +4,7 @@ import (
 	"time"
 )
 
-const defaultInstallPath = "./playwright-driver"
+var defaultInstallPath string = getEnvOrDefault("PLAYWRIGHT_BROWSERS_PATH", "./playwright-driver")
 
 // BrowserConfig contains browser startup options.
 type BrowserConfig struct {
@@ -15,8 +15,6 @@ type BrowserConfig struct {
 
 // InstallConfig contains installation options.
 type InstallConfig struct {
-	// Path where browsers are installed (PLAYWRIGHT_BROWSERS_PATH).
-	Path string
 	// Auto enables automatic installation on startup.
 	Auto bool
 	// WithDeps installs system dependencies (requires sudo on Linux).
@@ -87,7 +85,6 @@ func DefaultConfig() *Config {
 			Timeout: 60 * time.Second,
 		},
 		Install: InstallConfig{
-			Path:     defaultInstallPath,
 			Auto:     true,
 			WithDeps: true,
 		},
@@ -122,11 +119,6 @@ func WithBrowserTimeout(timeout time.Duration) Option {
 }
 
 // --- Install Options ---
-
-func WithInstallPath(path string) Option {
-	return func(c *Config) { c.Install.Path = path }
-}
-
 func WithAutoInstall(auto bool) Option {
 	return func(c *Config) { c.Install.Auto = auto }
 }
