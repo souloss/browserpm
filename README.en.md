@@ -3,7 +3,7 @@
 [English](./README.en.md) | 中文
 
 
-A production-ready browser page manager built on [playwright-go](https://github.com/playwright-community/playwright-go). It manages browser sessions with automatic page pooling, health checking, and recovery.
+A production-ready browser page pool manager with auto-recovery.
 
 ## Features
 

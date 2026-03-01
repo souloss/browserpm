@@ -2,7 +2,7 @@
 
 # browserpm
 
-一个生产就绪的浏览器页面管理器，基于 [playwright-go](https://github.com/playwright-community/playwright-go) 构建。它管理浏览器会话，具有自动页面池化、健康检查和恢复功能。
+一个生产就绪的浏览器页面池管理器，支持自动恢复。
 
 ## 特性
 
