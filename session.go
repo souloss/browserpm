@@ -186,6 +186,47 @@ func (s *Session) Status() SessionInfo {
 	return info
 }
 
+// IsHealthy returns true if the session is active and has at least one healthy page.
+func (s *Session) IsHealthy() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.state == SessionClosed {
+		return false
+	}
+	if s.pool == nil {
+		// Pool not yet initialized, consider healthy
+		return s.state == SessionActive
+	}
+	return s.pool.IsHealthy()
+}
+
+// HealthCheck performs a health check on all pages in the pool.
+// Returns the number of unhealthy pages found.
+func (s *Session) HealthCheck(ctx context.Context) int {
+	s.mu.RLock()
+	pool := s.pool
+	s.mu.RUnlock()
+
+	if pool == nil {
+		return 0
+	}
+	return pool.HealthCheck(ctx)
+}
+
+// Stats returns runtime statistics for the session's page pool.
+func (s *Session) Stats() *PoolStats {
+	s.mu.RLock()
+	pool := s.pool
+	s.mu.RUnlock()
+
+	if pool == nil {
+		return nil
+	}
+	stats := pool.Stats()
+	return &stats
+}
+
 // Close shuts down the session, drains active operations, and releases
 // all resources (pages, context).
 func (s *Session) Close() error {

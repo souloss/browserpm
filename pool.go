@@ -321,3 +321,70 @@ func (p *PagePool) RebuildAll() error {
 	p.scheduler.Reset()
 	return p.warmUp(p.config.MinPages)
 }
+
+// PoolStats contains runtime statistics for a page pool.
+type PoolStats struct {
+	TotalPages   int     // total pages in pool (all states)
+	IdlePages    int     // pages available for operations
+	ClosingPages int     // pages in grace period, draining
+	ActiveOps    int64   // total active operations across all pages
+	TotalUse     int64   // cumulative use count across all pages
+}
+
+// Stats returns a snapshot of the pool's runtime statistics.
+func (p *PagePool) Stats() PoolStats {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	var idle, closing int
+	var totalUse int64
+	for _, pp := range p.pages {
+		switch pp.getState() {
+		case pageIdle:
+			idle++
+		case pageClosing:
+			closing++
+		}
+		totalUse += pp.useCount.Load()
+	}
+
+	return PoolStats{
+		TotalPages:   len(p.pages),
+		IdlePages:    idle,
+		ClosingPages: closing,
+		ActiveOps:    p.ActiveOps(),
+		TotalUse:     totalUse,
+	}
+}
+
+// IsHealthy returns true if the pool has at least one idle page.
+func (p *PagePool) IsHealthy() bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	for _, pp := range p.pages {
+		if pp.getState() == pageIdle && !pp.page.IsClosed() {
+			return true
+		}
+	}
+	return len(p.pages) == 0 // empty pool is considered healthy (not yet started)
+}
+
+// HealthCheck performs a health check on all pages and returns the count of unhealthy pages.
+func (p *PagePool) HealthCheck(ctx context.Context) int {
+	p.mu.RLock()
+	snapshot := make([]*poolPage, len(p.pages))
+	copy(snapshot, p.pages)
+	p.mu.RUnlock()
+
+	var unhealthy int
+	for _, pp := range snapshot {
+		if pp.getState() != pageIdle {
+			continue
+		}
+		if !p.isPageHealthy(pp) {
+			unhealthy++
+		}
+	}
+	return unhealthy
+}
