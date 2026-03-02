@@ -206,3 +206,40 @@ func (m *BrowserManager) Close() error {
 func (m *BrowserManager) Browser() playwright.Browser {
 	return m.browser
 }
+
+// Do executes op on a temporary BrowserContext and Page with the given options.
+// The context and page are created fresh for this operation and closed afterward.
+// This is useful for one-off operations that need isolated context configuration
+// (e.g., different storageState, userAgent, proxy per operation).
+//
+// Example:
+//
+//	err := manager.Do(ctx, playwright.BrowserNewContextOptions{
+//	    StorageState: myStorageState,
+//	    UserAgent:    playwright.String("my-agent"),
+//	}, func(page playwright.Page) error {
+//	    _, err := page.Goto("https://example.com")
+//	    return err
+//	})
+func (m *BrowserManager) Do(ctx context.Context, opts playwright.BrowserNewContextOptions, op OperationFunc) error {
+	if m.closed.Load() {
+		return NewError(ErrClosed, "manager is closed")
+	}
+
+	// Create temporary context
+	bCtx, err := m.browser.NewContext(opts)
+	if err != nil {
+		return WrapError(err, ErrContextDead, "failed to create browser context")
+	}
+	defer bCtx.Close()
+
+	// Create temporary page
+	page, err := bCtx.NewPage()
+	if err != nil {
+		return WrapError(err, ErrPageUnavailable, "failed to create page")
+	}
+	defer page.Close()
+
+	// Execute operation
+	return op(page)
+}

@@ -210,17 +210,39 @@ err := session.Do(ctx, func(page playwright.Page) error {
 })
 ```
 
-### DoShare（池化页面）
+### Manager.Do（一次性操作）
 
-使用共享池中的页面。操作后页面保留在池中。自动重试并替换不健康的页面。
+无需创建 Session，直接在 Manager 上执行一次性操作。每次调用都会创建临时 BrowserContext 和 Page，执行完毕后自动清理。
+
+适用场景：
+- 需要不同的 storageState（如不同账号）
+- 一次性操作，无需复用页面
+- 需要完全隔离的上下文配置
 
 ```go
-err := session.DoShare(ctx, func(page playwright.Page) error {
-    result, _ := page.Evaluate(`() => document.title`)
-    return nil
+// 最简单：无配置
+err := manager.Do(ctx, playwright.BrowserNewContextOptions{
+    UserAgent: playwright.String("browserpm-test/1.0"),
+}, func(page playwright.Page) error {
+    _, err := page.Goto("https://example.com")
+    return err
 })
 ```
 
+**完整配置：**
+
+```go
+err := manager.Do(ctx, playwright.BrowserNewContextOptions{
+    StorageState: storageState, // storageState 从其他地方获取
+    UserAgent:    playwright.String("my-agent"),
+    Viewport:     &playwright.Size{Width: 1920, Height: 1080},
+}, func(page playwright.Page) error {
+    _, err := page.Goto("https://example.com")
+    return err
+})
+```
+
+### DoShare（池化页面）
 ## 错误处理
 
 库使用带有错误码的结构化错误：

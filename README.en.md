@@ -211,6 +211,38 @@ err := session.Do(ctx, func(page playwright.Page) error {
 })
 ```
 
+### Manager.Do (One-off Operation)
+
+Execute a one-off operation directly on the Manager without creating a Session. Each call creates a temporary BrowserContext and Page, which are cleaned up after the operation.
+
+Use cases:
+- Different storageState per operation (e.g., different accounts)
+- One-off operations that don't need page reuse
+- Fully isolated context configuration
+
+```go
+// Simple: no configuration
+err := manager.Do(ctx, playwright.BrowserNewContextOptions{
+    UserAgent: playwright.String("browserpm-test/1.0"),
+}, func(page playwright.Page) error {
+    _, err := page.Goto("https://example.com")
+    return err
+})
+```
+
+**Full configuration:**
+
+```go
+err := manager.Do(ctx, playwright.BrowserNewContextOptions{
+    StorageState: storageState, // obtained from elsewhere
+    UserAgent:    playwright.String("my-agent"),
+    Viewport:     &playwright.Size{Width: 1920, Height: 1080},
+}, func(page playwright.Page) error {
+    _, err := page.Goto("https://example.com")
+    return err
+})
+```
+
 ### DoShare (Pooled Page)
 
 Uses a page from the shared pool. Page remains in pool after operation. Automatically retries and replaces unhealthy pages.
