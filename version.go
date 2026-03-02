@@ -2,7 +2,7 @@ package browserpm
 
 // Version information
 const (
-	Version = "v0.0.1"
+	Version = "v0.0.2"
 )
 
 // GetVersion returns the library version
