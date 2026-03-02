@@ -1,6 +1,7 @@
 package browserpm
 
 import (
+	"fmt"
 	"time"
 )
 
@@ -167,13 +168,60 @@ func WithLogger(l Logger) Option {
 	return func(c *Config) { c.Logger = l }
 }
 
+// Validate checks the configuration for invalid or inconsistent values.
+func (c *Config) Validate() error {
+	if err := c.Pool.Validate(); err != nil {
+		return err
+	}
+	if c.Browser.Timeout <= 0 {
+		return fmt.Errorf("browserpm: Browser.Timeout must be positive, got %v", c.Browser.Timeout)
+	}
+	return nil
+}
+
+// Validate checks pool configuration for invalid or inconsistent values.
+func (p *PoolConfig) Validate() error {
+	if p.MinPages < 0 {
+		return fmt.Errorf("browserpm: Pool.MinPages must be non-negative, got %d", p.MinPages)
+	}
+	if p.MaxPages < 1 {
+		return fmt.Errorf("browserpm: Pool.MaxPages must be at least 1, got %d", p.MaxPages)
+	}
+	if p.MinPages > p.MaxPages {
+		return fmt.Errorf("browserpm: Pool.MinPages (%d) must not exceed Pool.MaxPages (%d)", p.MinPages, p.MaxPages)
+	}
+	if p.TTL < 0 {
+		return fmt.Errorf("browserpm: Pool.TTL must be non-negative, got %v", p.TTL)
+	}
+	if p.GracePeriod < 0 {
+		return fmt.Errorf("browserpm: Pool.GracePeriod must be non-negative, got %v", p.GracePeriod)
+	}
+	if p.TTL > 0 && p.GracePeriod >= p.TTL {
+		return fmt.Errorf("browserpm: Pool.GracePeriod (%v) must be less than Pool.TTL (%v)", p.GracePeriod, p.TTL)
+	}
+	if p.OperationTimeout <= 0 {
+		return fmt.Errorf("browserpm: Pool.OperationTimeout must be positive, got %v", p.OperationTimeout)
+	}
+	if p.InitTimeout <= 0 {
+		return fmt.Errorf("browserpm: Pool.InitTimeout must be positive, got %v", p.InitTimeout)
+	}
+	if p.HealthCheckInterval < 0 {
+		return fmt.Errorf("browserpm: Pool.HealthCheckInterval must be non-negative, got %v", p.HealthCheckInterval)
+	}
+	return nil
+}
+
 // NewConfig creates a new Config with options applied.
-func NewConfig(opts ...Option) *Config {
+// Returns an error if the resulting configuration is invalid.
+func NewConfig(opts ...Option) (*Config, error) {
 	cfg := DefaultConfig()
 	for _, opt := range opts {
 		opt(cfg)
 	}
-	return cfg
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	return cfg, nil
 }
 
 // --- Session Options (per-session pool overrides) ---

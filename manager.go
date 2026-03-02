@@ -29,7 +29,10 @@ type BrowserManager struct {
 // installs the driver (if configured), launches the browser, and
 // establishes a CDP session for process monitoring.
 func New(opts ...Option) (*BrowserManager, error) {
-	cfg := NewConfig(opts...)
+	cfg, err := NewConfig(opts...)
+	if err != nil {
+		return nil, err
+	}
 	log := cfg.Logger
 	if log == nil {
 		log = NewZapLogger()
@@ -105,6 +108,9 @@ func (m *BrowserManager) CreateSession(name string, cp ContextProvider, pp PageP
 	poolCfg := m.config.Pool
 	for _, opt := range opts {
 		opt(&poolCfg)
+	}
+	if err := poolCfg.Validate(); err != nil {
+		return nil, WrapError(err, ErrInvalidState, "invalid session pool config")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
