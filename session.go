@@ -273,11 +273,11 @@ func (s *Session) isContextDead() bool {
 	if bCtx == nil {
 		return true
 	}
-	// Try a cheap operation; if the context is dead, Pages() will fail or
-	// return nil on a closed context.
-	defer func() { recover() }()
-	_ = bCtx.Pages()
-	return false
+	// Use Cookies() as a lightweight probe — it returns an error when the
+	// context has been closed, unlike Pages() which would require a panic
+	// recovery to detect a dead context.
+	_, err := bCtx.Cookies()
+	return err != nil
 }
 
 // ensureContext creates the BrowserContext and page pool if they don't exist.
