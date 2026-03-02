@@ -61,6 +61,11 @@ type PagePool struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+
+	// releaseCond is broadcast whenever a page is released or active ops
+	// reach zero, waking Acquire/Drain waiters instead of busy-polling.
+	waitMu      sync.Mutex
+	releaseCond *sync.Cond
 }
 
 func newPagePool(cfg PoolConfig, provider PageProvider, log Logger, createPage func() (playwright.Page, error)) *PagePool {
@@ -74,6 +79,7 @@ func newPagePool(cfg PoolConfig, provider PageProvider, log Logger, createPage f
 		ctx:        ctx,
 		cancel:     cancel,
 	}
+	p.releaseCond = sync.NewCond(&p.waitMu)
 	return p
 }
 
@@ -157,26 +163,38 @@ func (p *PagePool) Acquire(ctx context.Context) (*poolPage, error) {
 		return newPP, nil
 	}
 
-	// Pool exhausted — spin briefly for a page to become available.
+	// Pool exhausted — wait for a Release signal instead of busy-polling.
 	deadline, hasDeadline := ctx.Deadline()
 	if !hasDeadline {
 		deadline = time.Now().Add(p.config.OperationTimeout)
 	}
 
-	ticker := time.NewTicker(2 * time.Millisecond)
-	defer ticker.Stop()
+	// Use a timer to enforce the deadline and a goroutine to wake us on
+	// context cancellation, since sync.Cond has no native select support.
+	timer := time.AfterFunc(time.Until(deadline), func() {
+		p.releaseCond.Broadcast()
+	})
+	defer timer.Stop()
+
+	// Also wake on context cancellation.
+	stop := context.AfterFunc(ctx, func() {
+		p.releaseCond.Broadcast()
+	})
+	defer stop()
+
+	p.waitMu.Lock()
+	defer p.waitMu.Unlock()
 	for {
-		select {
-		case <-ctx.Done():
-			return nil, WrapError(ctx.Err(), ErrTimeout, "acquire page timed out")
-		case <-ticker.C:
-			if time.Now().After(deadline) {
-				return nil, NewError(ErrPoolExhausted, "all pages busy and pool at max capacity")
-			}
-			if pp, _ = p.tryAcquire(); pp != nil {
-				return pp, nil
-			}
+		if pp, _ = p.tryAcquire(); pp != nil {
+			return pp, nil
 		}
+		if ctx.Err() != nil {
+			return nil, WrapError(ctx.Err(), ErrTimeout, "acquire page timed out")
+		}
+		if time.Now().After(deadline) {
+			return nil, NewError(ErrPoolExhausted, "all pages busy and pool at max capacity")
+		}
+		p.releaseCond.Wait() // blocks until Release broadcasts
 	}
 }
 
@@ -222,9 +240,10 @@ func (p *PagePool) selectAvailable(now time.Time) *poolPage {
 	return p.scheduler.Select(filtered)
 }
 
-// Release returns a page to the pool after use.
+// Release returns a page to the pool after use and wakes any waiters.
 func (p *PagePool) Release(pp *poolPage) {
 	pp.activeOps.Add(-1)
+	p.releaseCond.Broadcast()
 }
 
 
@@ -240,6 +259,12 @@ func (p *PagePool) Size() int {
 func (p *PagePool) ActiveOps() int64 {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
+	return p.activeOpsLocked()
+}
+
+// activeOpsLocked returns the sum of active operations. Caller must hold at
+// least a read lock on p.mu.
+func (p *PagePool) activeOpsLocked() int64 {
 	var total int64
 	for _, pp := range p.pages {
 		total += pp.activeOps.Load()
@@ -296,13 +321,24 @@ func (p *PagePool) Close() error {
 }
 
 // Drain waits for all active operations to complete, with a timeout.
+// It uses the releaseCond signal instead of busy-polling.
 func (p *PagePool) Drain(timeout time.Duration) {
 	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
+	timer := time.AfterFunc(timeout, func() {
+		p.releaseCond.Broadcast()
+	})
+	defer timer.Stop()
+
+	p.waitMu.Lock()
+	defer p.waitMu.Unlock()
+	for {
 		if p.ActiveOps() == 0 {
 			return
 		}
-		time.Sleep(50 * time.Millisecond)
+		if time.Now().After(deadline) {
+			return
+		}
+		p.releaseCond.Wait()
 	}
 }
 
