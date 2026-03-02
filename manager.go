@@ -101,9 +101,6 @@ func (m *BrowserManager) CreateSession(name string, cp ContextProvider, pp PageP
 	if m.closed.Load() {
 		return nil, NewError(ErrClosed, "manager is closed")
 	}
-	if _, loaded := m.sessions.Load(name); loaded {
-		return nil, NewError(ErrSessionExists, "session already exists: "+name)
-	}
 
 	poolCfg := m.config.Pool
 	for _, opt := range opts {
@@ -127,6 +124,8 @@ func (m *BrowserManager) CreateSession(name string, cp ContextProvider, pp PageP
 		created:         time.Now(),
 	}
 
+	// Use LoadOrStore directly to avoid the TOCTOU race that existed when
+	// a separate Load check preceded this call.
 	if _, loaded := m.sessions.LoadOrStore(name, s); loaded {
 		cancel()
 		return nil, NewError(ErrSessionExists, "session already exists: "+name)
