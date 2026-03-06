@@ -159,7 +159,7 @@ func TestOKX(t *testing.T) {
 
 	manager, err := New(
 		WithHeadless(true),
-		WithAutoInstall(true),
+		WithAutoInstall(false),
 		WithMinPages(pageCount),
 		WithMaxPages(pageCount),
 		WithPoolTTL(30*time.Minute),

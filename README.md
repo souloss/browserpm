@@ -17,6 +17,9 @@
 
 ## 安装
 
+- Go 1.24+
+- playwright-go v0.5700.1+
+
 ```bash
 go get github.com/souloss/browserpm
 ```
@@ -127,7 +130,6 @@ manager, err := browserpm.New(
     browserpm.WithBrowserTimeout(60*time.Second),
 
     // 安装选项
-    browserpm.WithInstallPath("./playwright-driver"),
     browserpm.WithAutoInstall(true),
     browserpm.WithDeps(true),
 
@@ -162,7 +164,6 @@ session, err := manager.CreateSession("my-session", cp, pp,
 |------|--------|------|
 | `Headless` | `true` | 无头模式运行浏览器 |
 | `Browser.Timeout` | `60s` | 浏览器启动超时 |
-| `Install.Path` | `./playwright-driver` | Playwright 驱动路径 |
 | `Install.Auto` | `true` | 启动时自动安装 |
 | `Install.WithDeps` | `true` | 安装系统依赖 |
 | `Pool.MinPages` | `1` | 最小预热页面数 |
@@ -243,6 +244,16 @@ err := manager.Do(ctx, playwright.BrowserNewContextOptions{
 ```
 
 ### DoShare（池化页面）
+
+从池中获取页面，执行操作后归还。多个 goroutine 可并发使用同一页面。
+
+```go
+err := session.DoShare(ctx, func(page playwright.Page) error {
+    result, err := page.Evaluate(`() => document.title`)
+    return err
+})
+```
+
 ## 错误处理
 
 库使用带有错误码的结构化错误：
@@ -352,6 +363,15 @@ manager, _ := browserpm.New(browserpm.WithLogger(browserpm.NewNopLogger()))
 5. **TTL 回收**: TTL 过期后页面被回收
 6. **恢复**: 死亡的上下文/页面自动重建
 7. **关闭**: `Close()` 排空活跃操作，关闭页面、上下文、浏览器
+
+## 性能
+
+针对高并发 JS 场景（如 OKX ontGet），已通过参数矩阵优化：
+
+- **基线**: 单次 `Evaluate`，5 页面，50 并发 → ~77 QPS
+- **优化后**: 批量 `Promise.all`，1 页面，1000 并发 → ~3800 QPS（约 50 倍提升）
+
+关键：使用 `page.Evaluate` 的 `Promise.all` 批量调用减少 CDP 往返；少页面 + 高并发优于多页面。
 
 ## 许可证
 
