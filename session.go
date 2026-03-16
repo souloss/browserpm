@@ -2,7 +2,9 @@ package browserpm
 
 import (
 	"context"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/playwright-community/playwright-go"
@@ -49,13 +51,14 @@ type Session struct {
 	poolConfig      PoolConfig
 	log             Logger
 
-	mu      sync.RWMutex
-	ctx     context.Context
-	cancel  context.CancelFunc
-	bCtx    playwright.BrowserContext
-	pool    *PagePool
-	state   SessionState
-	created time.Time
+	mu         sync.RWMutex
+	ctx        context.Context
+	cancel     context.CancelFunc
+	bCtx       playwright.BrowserContext
+	pool       *PagePool
+	state      SessionState
+	created    time.Time
+	rebuilding atomic.Bool // prevents concurrent context rebuilds
 }
 
 const maxRetries = 2
@@ -82,8 +85,10 @@ func (s *Session) Do(ctx context.Context, op OperationFunc) error {
 		}
 		lastErr = err
 
-		if s.isContextDead() {
-			s.log.Warn("context dead during Do, rebuilding", String("session", s.name), Int("attempt", attempt))
+		// Check for connection-level errors (WebSocket/CDP drops) or context death
+		if isConnectionError(err) || s.isContextDead() {
+			s.log.Warn("connection/context issue during Do, rebuilding",
+				String("session", s.name), Int("attempt", attempt), Err(err))
 			if rbErr := s.rebuildContext(); rbErr != nil {
 				return WrapError(rbErr, ErrContextDead, "context rebuild failed")
 			}
@@ -133,9 +138,10 @@ func (s *Session) DoShare(ctx context.Context, op OperationFunc) error {
 		pp, err := s.pool.Acquire(ctx)
 		if err != nil {
 			lastErr = err
-			if s.isContextDead() {
-				s.log.Warn("context dead during DoShare acquire, rebuilding",
-					String("session", s.name), Int("attempt", attempt))
+			// Check for connection errors during page acquisition
+			if isConnectionError(err) || s.isContextDead() {
+				s.log.Warn("connection/context issue during DoShare acquire, rebuilding",
+					String("session", s.name), Int("attempt", attempt), Err(err))
 				if rbErr := s.rebuildContext(); rbErr != nil {
 					return WrapError(rbErr, ErrContextDead, "context rebuild failed")
 				}
@@ -151,9 +157,10 @@ func (s *Session) DoShare(ctx context.Context, op OperationFunc) error {
 		}
 		lastErr = err
 
-		if pp.page.IsClosed() || s.isContextDead() {
-			s.log.Warn("page/context issue during DoShare, recovering",
-				String("session", s.name), String("page_id", pp.id), Int("attempt", attempt))
+		// Check for connection-level errors, closed page, or dead context
+		if isConnectionError(err) || pp.page.IsClosed() || s.isContextDead() {
+			s.log.Warn("connection/page/context issue during DoShare, recovering",
+				String("session", s.name), String("page_id", pp.id), Int("attempt", attempt), Err(err))
 			if s.isContextDead() {
 				if rbErr := s.rebuildContext(); rbErr != nil {
 					return WrapError(rbErr, ErrContextDead, "context rebuild failed")
@@ -257,6 +264,45 @@ func (s *Session) Close() error {
 	return nil
 }
 
+// --- Connection error detection ---
+
+// connectionErrorPatterns contains error message patterns that indicate
+// a lost WebSocket/CDP connection requiring context rebuild.
+// These patterns are specific to Playwright/Chromium connection failures.
+// Note: Avoid overly generic patterns like "dead" or "closed" that could
+// match business-level errors (e.g., "context deadline exceeded").
+var ConnectionErrorPatterns = []string{
+	"target closed",
+	"Target closed",
+	"Session closed",
+	"Connection closed",
+	"Execution context was destroyed",
+	"execution context was destroyed",
+	"could not read protocol",
+	"protocol padding",
+	"frame was detached",
+	"page has been closed",
+	"websocket closed",
+	"socket hang up",
+}
+
+func IsConnectionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	for _, pattern := range ConnectionErrorPatterns {
+		if strings.Contains(msg, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+func isConnectionError(err error) bool {
+	return IsConnectionError(err)
+}
+
 // --- Internal helpers ---
 
 func (s *Session) isClosed() bool {
@@ -300,7 +346,22 @@ func (s *Session) ensureContext() error {
 }
 
 // rebuildContext tears down and rebuilds the context and pool.
+// It uses an atomic flag to prevent concurrent rebuilds.
 func (s *Session) rebuildContext() error {
+	// Prevent concurrent rebuilds
+	if s.rebuilding.Swap(true) {
+		s.log.Debug("rebuild already in progress, waiting", String("session", s.name))
+		// Wait for the ongoing rebuild to complete (up to 10 seconds)
+		for i := 0; i < 100; i++ {
+			time.Sleep(100 * time.Millisecond)
+			if !s.rebuilding.Load() {
+				return nil
+			}
+		}
+		return NewError(ErrInvalidState, "rebuild timeout: another rebuild is taking too long")
+	}
+	defer s.rebuilding.Store(false)
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
