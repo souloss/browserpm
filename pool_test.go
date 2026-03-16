@@ -372,7 +372,10 @@ func TestPoolPageConcurrentStateChange(t *testing.T) {
 }
 
 func TestPoolConfigDefaults(t *testing.T) {
-	cfg := NewConfig()
+	cfg, err := NewConfig()
+	if err != nil {
+		t.Fatalf("NewConfig: %v", err)
+	}
 
 	if cfg.Pool.MinPages <= 0 {
 		t.Error("expected default MinPages to be positive")

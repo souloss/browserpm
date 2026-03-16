@@ -86,7 +86,10 @@ func TestConfigOptions_Application(t *testing.T) {
 		WithScheduleStrategy("round-robin"),
 	}
 
-	cfg := NewConfig()
+	cfg, err := NewConfig()
+	if err != nil {
+		t.Fatalf("NewConfig: %v", err)
+	}
 	for _, opt := range opts {
 		opt(cfg)
 	}
@@ -137,9 +140,8 @@ func TestPoolConfig_Validation(t *testing.T) {
 			OperationTimeout: 30 * time.Second,
 			InitTimeout:      10 * time.Second,
 		}
-
-		if cfg.MinPages > cfg.MaxPages {
-			t.Error("MinPages should not exceed MaxPages")
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("expected valid config, got: %v", err)
 		}
 	})
 
@@ -148,9 +150,8 @@ func TestPoolConfig_Validation(t *testing.T) {
 			MinPages: 10,
 			MaxPages: 5,
 		}
-
-		if cfg.MinPages <= cfg.MaxPages {
-			t.Error("expected MinPages > MaxPages for this test case")
+		if err := cfg.Validate(); err == nil {
+			t.Error("expected validation error when MinPages > MaxPages")
 		}
 	})
 }
